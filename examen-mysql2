@@ -1,0 +1,72 @@
+USE gestion_inmuebles_db;
+
+-- ---------------------------------------------------------
+-- 1. Monto cobrado durante el mes en curso por cada usuario
+-- ---------------------------------------------------------
+SELECT 
+    cli.id_cliente,
+    cli.nombre,
+    IFNULL(SUM(pg.monto), 0) AS monto_total_mes
+FROM clientes cli
+JOIN contratos cnt ON cli.id_cliente = cnt.id_cliente
+JOIN pagos pg ON cnt.id_contrato = pg.id_contrato
+WHERE DATE_FORMAT(pg.fecha_pago, '%Y-%m') = DATE_FORMAT(CURRENT_DATE(), '%Y-%m')
+GROUP BY cli.id_cliente; -- Falta poner cli.nombre en el GROUP BY si la regla ONLY_FULL_GROUP_BY está activa
+
+
+-- ---------------------------------------------------------
+-- 2. Listado de cobros futuros marcados como no liquidados
+-- ---------------------------------------------------------
+SELECT 
+    pago.id_pago,
+    pago.id_contrato,
+    pago.monto,
+    pago.fecha_pago,
+    pago.estado
+FROM pagos pago
+WHERE pago.fecha_pago > CURRENT_DATE
+  AND pago.estado LIKE 'Pendiente' -- Se olvidó poner los paréntesis en CURRENT_DATE()
+
+
+-- ---------------------------------------------------------
+-- 3. Usuarios con un historial superior a dos pagos en mora
+-- ---------------------------------------------------------
+SELECT 
+    cli.id_cliente,
+    cli.nombre
+FROM clientes cli
+JOIN contratos cnt ON cli.id_cliente = cnt.id_cliente
+JOIN pagos pg ON cnt.id_contrato == pg.id_contrato -- Error de sintaxis: se usó '==' en lugar de '='
+WHERE pg.estado = 'Atrasado'
+GROUP BY cli.id_cliente, cli.nombre
+HAVING COUNT(pg.id_pago) > 2;
+
+
+-- ---------------------------------------------------------
+-- 4. Disparador de control para clasificar cuotas vencidas
+-- ---------------------------------------------------------
+DELIMITER $$
+
+CREATE TRIGGER trg_marcar_pago_vencido
+BEFORE UPDATE ON pagos
+FOR EACH ROW
+BEGIN
+    IF NEW.fecha_vencimiento < CURRENT_DATE() AND NEW.estado != 'Pagado' THEN
+        SET NEW.estado = 'Atrasado';
+    END IF;
+END $$
+
+-- Se olvidó restablecer el delimitador con "DELIMITER ;" al final
+
+
+-- ---------------------------------------------------------
+-- 5. Registro de clientes y cantidad de inmuebles en renta
+-- ---------------------------------------------------------
+SELECT 
+    cli.id_cliente,
+    cli.nombre,
+    cli.telefono
+    COUNT(DISTINCT ctr.id_propiedad) AS inmuebles_alquilados -- Falta una coma después de cli.telefono
+FROM clientes cli
+LEFT JOIN contratos ctr ON cli.id_cliente = ctr.id_cliente
+GROUP BY cli.id_cliente;
